@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#1f232b" />
+  <title>トリメモ</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <aside class="spaces-pane">
+      <div class="brand">
+        <div class="brand-mark">T</div>
+        <div>
+          <strong>トリメモ</strong>
+          <small>offline memo</small>
+        </div>
+      </div>
+
+      <div class="pane-title-row">
+        <span>スペース</span>
+        <button id="addSpaceBtn" class="icon-btn" title="スペース追加">＋</button>
+      </div>
+
+      <div id="spacesList" class="list"></div>
+
+      <div class="utility-stack">
+        <button id="exportBtn" class="secondary-btn">バックアップを書き出す</button>
+        <label class="secondary-btn file-label">
+          バックアップを読み込む
+          <input id="importInput" type="file" accept="application/json,.json" hidden />
+        </label>
+      </div>
+    </aside>
+
+    <aside class="groups-pane">
+      <div class="pane-title-row group-title-row">
+        <div>
+          <small>現在のスペース</small>
+          <strong id="currentSpaceName">未選択</strong>
+        </div>
+        <button id="addGroupBtn" class="icon-btn" title="グループ追加">＋</button>
+      </div>
+
+      <div class="section-label">メモグループ</div>
+      <div id="groupsList" class="list"></div>
+    </aside>
+
+    <main class="notes-pane">
+      <header class="notes-header">
+        <div class="mobile-nav">
+          <button id="toggleSpacesBtn" class="icon-btn">☰</button>
+          <button id="toggleGroupsBtn" class="icon-btn">#</button>
+        </div>
+        <div class="header-copy">
+          <small>メモグループ</small>
+          <h1 id="currentGroupName">グループを選択</h1>
+        </div>
+        <div class="header-actions">
+          <input id="searchInput" class="search" type="search" placeholder="メモを検索" />
+        </div>
+      </header>
+
+      <section id="emptyState" class="empty-state">
+        <div class="empty-emoji">📝</div>
+        <h2>トリメモへようこそ</h2>
+        <p>左から「スペース」と「メモグループ」を作ると、Discordのチャンネルのようにメモを書きためられます。</p>
+      </section>
+
+      <section id="notesList" class="notes-list"></section>
+
+      <section class="composer">
+        <textarea id="noteInput" rows="3" placeholder="メモを書く…"></textarea>
+        <div class="composer-row">
+          <label class="attach-btn">
+            📎 画像・動画
+            <input id="attachmentInput" type="file" accept="image/*,video/*" multiple hidden />
+          </label>
+          <span id="attachmentStatus" class="attachment-status"></span>
+          <button id="saveNoteBtn" class="primary-btn">保存</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
