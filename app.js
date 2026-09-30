@@ -33,6 +33,9 @@ const els = {
   importInput: $('importInput'),
   toggleSpacesBtn: $('toggleSpacesBtn'),
   toggleGroupsBtn: $('toggleGroupsBtn'),
+  imageModal: $('imageModal'),
+  imageModalImg: $('imageModalImg'),
+  closeImageModalBtn: $('closeImageModalBtn'),
 };
 
 function toast(message) {
@@ -228,8 +231,15 @@ async function renderNotes() {
       const node = document.createElement(att.type.startsWith('video/') ? 'video' : 'img');
       node.src = url;
       node.alt = att.name || '添付ファイル';
-      if (node.tagName === 'VIDEO') node.controls = true;
-      node.onload = node.onloadeddata = () => setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if (node.tagName === 'VIDEO') {
+        node.controls = true;
+      } else {
+        node.dataset.fullImage = url;
+        node.title = 'タップで拡大';
+      }
+      node.onload = node.onloadeddata = () => {
+        if (node.tagName === 'VIDEO') setTimeout(() => URL.revokeObjectURL(url), 1000);
+      };
       box.append(node);
     }
   }
@@ -473,6 +483,37 @@ function closeMobilePanels() {
   document.querySelector('.spaces-pane')?.classList.remove('open');
   document.querySelector('.groups-pane')?.classList.remove('open');
 }
+
+function openImageModal(src, alt = '拡大画像') {
+  els.imageModalImg.src = src;
+  els.imageModalImg.alt = alt;
+  els.imageModal.classList.remove('hidden');
+  els.imageModal.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeImageModal() {
+  els.imageModal.classList.add('hidden');
+  els.imageModal.setAttribute('aria-hidden', 'true');
+  els.imageModalImg.removeAttribute('src');
+  document.body.style.overflow = '';
+}
+
+els.notesList.addEventListener('click', (e) => {
+  const img = e.target.closest('img[data-full-image]');
+  if (!img) return;
+  openImageModal(img.dataset.fullImage || img.src, img.alt || '拡大画像');
+});
+
+els.closeImageModalBtn.addEventListener('click', closeImageModal);
+els.imageModal.addEventListener('click', (e) => {
+  if (e.target === els.imageModal || e.target.classList.contains('image-modal-backdrop')) {
+    closeImageModal();
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !els.imageModal.classList.contains('hidden')) closeImageModal();
+});
 
 async function ensureDemoData() {
   const spaces = await getAll('spaces');
