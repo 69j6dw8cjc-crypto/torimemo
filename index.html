@@ -7,17 +7,18 @@
   <title>トリメモ</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="./style.css?v=1.2" />
 </head>
 <body>
   <div id="app" class="app-shell">
     <aside class="spaces-pane">
       <div class="brand">
         <div class="brand-mark">T</div>
-        <div>
+        <div class="brand-copy">
           <strong>トリメモ</strong>
-          <small>offline memo</small>
+          <small>offline memo · v1.2</small>
         </div>
+        <button id="collapseSpacesBtn" class="pane-collapse-btn" title="スペースを隠す">‹</button>
       </div>
 
       <div class="pane-title-row">
@@ -28,6 +29,17 @@
       <div id="spacesList" class="list"></div>
 
       <div class="utility-stack">
+        <div class="theme-box">
+          <div>
+            <strong>テーマカラー</strong>
+            <small>ボタンや選択色を変更</small>
+          </div>
+          <div class="theme-controls">
+            <input id="themeColorInput" class="theme-color-input" type="color" value="#7c5cff" aria-label="テーマカラー" />
+            <button id="resetThemeBtn" class="mini-square-btn" title="初期色に戻す">↺</button>
+          </div>
+        </div>
+
         <button id="exportBtn" class="secondary-btn">バックアップを書き出す</button>
         <label class="secondary-btn file-label">
           バックアップを読み込む
@@ -38,11 +50,14 @@
 
     <aside class="groups-pane">
       <div class="pane-title-row group-title-row">
-        <div>
+        <div class="current-space-label">
           <small>現在のスペース</small>
-          <strong id="currentSpaceName">未選択</strong>
+          <strong><span id="currentSpaceIcon">🗂️</span> <span id="currentSpaceName">未選択</span></strong>
         </div>
-        <button id="addGroupBtn" class="icon-btn" title="グループ追加">＋</button>
+        <div class="pane-title-actions">
+          <button id="addGroupBtn" class="icon-btn" title="グループ追加">＋</button>
+          <button id="collapseGroupsBtn" class="pane-collapse-btn inline" title="メモグループを隠す">‹</button>
+        </div>
       </div>
 
       <div class="section-label">メモグループ</div>
@@ -51,9 +66,9 @@
 
     <main class="notes-pane">
       <header class="notes-header">
-        <div class="mobile-nav">
-          <button id="toggleSpacesBtn" class="icon-btn">☰</button>
-          <button id="toggleGroupsBtn" class="icon-btn">#</button>
+        <div class="pane-nav">
+          <button id="toggleSpacesBtn" class="icon-btn" title="スペースを開く/閉じる">▣</button>
+          <button id="toggleGroupsBtn" class="icon-btn" title="メモグループを開く/閉じる">#</button>
         </div>
         <div class="header-copy">
           <small>メモグループ</small>
@@ -67,7 +82,7 @@
       <section id="emptyState" class="empty-state">
         <div class="empty-emoji">📝</div>
         <h2>トリメモへようこそ</h2>
-        <p>左から「スペース」と「メモグループ」を作ると、Discordのチャンネルのようにメモを書きためられます。</p>
+        <p>スペースとメモグループを作って、メモを書きためられます。</p>
       </section>
 
       <section id="notesList" class="notes-list"></section>
@@ -76,8 +91,8 @@
         <textarea id="noteInput" rows="3" placeholder="メモを書く…"></textarea>
         <div class="composer-row">
           <label class="attach-btn">
-            📎 画像・動画
-            <input id="attachmentInput" type="file" accept="image/*,video/*" multiple hidden />
+            📎 ファイル
+            <input id="attachmentInput" type="file" multiple hidden />
           </label>
           <span id="attachmentStatus" class="attachment-status"></span>
           <button id="saveNoteBtn" class="primary-btn">保存</button>
@@ -86,14 +101,19 @@
     </main>
   </div>
 
-
-  <div id="imageModal" class="image-modal hidden" aria-hidden="true">
-    <button id="closeImageModalBtn" class="image-modal-close" aria-label="閉じる">×</button>
-    <div class="image-modal-backdrop"></div>
-    <img id="imageModalImg" class="image-modal-img" alt="拡大画像" />
+  <div id="mediaModal" class="media-modal hidden" aria-hidden="true">
+    <div class="media-modal-backdrop"></div>
+    <div class="media-modal-toolbar">
+      <button id="saveModalMediaBtn" class="media-toolbar-btn">保存</button>
+      <button id="closeMediaModalBtn" class="media-modal-close" aria-label="閉じる">×</button>
+    </div>
+    <div class="media-modal-stage">
+      <img id="mediaModalImg" class="media-modal-content hidden" alt="拡大画像" />
+      <video id="mediaModalVideo" class="media-modal-content hidden" controls playsinline></video>
+    </div>
   </div>
 
   <div id="toast" class="toast" aria-live="polite"></div>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=1.2"></script>
 </body>
 </html>

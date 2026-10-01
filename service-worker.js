@@ -1,9 +1,9 @@
-const CACHE_NAME = 'torimemo-v1';
+const CACHE_NAME = 'torimemo-v1.2';
 const ASSETS = [
   './',
   './index.html',
-  './style.css',
-  './app.js',
+  './style.css?v=1.2',
+  './app.js?v=1.2',
   './manifest.webmanifest',
   './icon.svg'
 ];
@@ -24,13 +24,31 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
+  const isNavigation = event.request.mode === 'navigate';
+
+  if (isNavigation) {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put('./index.html', copy));
+          return response;
+        })
+        .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then(cached => {
-      return cached || fetch(event.request).then(response => {
+      const network = fetch(event.request).then(response => {
         const copy = response.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
         return response;
-      }).catch(() => caches.match('./index.html'));
+      }).catch(() => cached);
+
+      return cached || network;
     })
   );
 });

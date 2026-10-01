@@ -1,5 +1,6 @@
 const DB_NAME = 'torimemo-db';
 const DB_VERSION = 1;
+const DEFAULT_THEME = '#7c5cff';
 
 const state = {
   db: null,
@@ -10,16 +11,20 @@ const state = {
   currentSpaceId: null,
   currentGroupId: null,
   pendingFiles: [],
+  activeObjectUrls: new Set(),
+  modalAttachmentId: null,
 };
 
 const $ = (id) => document.getElementById(id);
 
 const els = {
+  app: $('app'),
   spacesList: $('spacesList'),
   groupsList: $('groupsList'),
   notesList: $('notesList'),
   addSpaceBtn: $('addSpaceBtn'),
   addGroupBtn: $('addGroupBtn'),
+  currentSpaceIcon: $('currentSpaceIcon'),
   currentSpaceName: $('currentSpaceName'),
   currentGroupName: $('currentGroupName'),
   noteInput: $('noteInput'),
@@ -33,16 +38,22 @@ const els = {
   importInput: $('importInput'),
   toggleSpacesBtn: $('toggleSpacesBtn'),
   toggleGroupsBtn: $('toggleGroupsBtn'),
-  imageModal: $('imageModal'),
-  imageModalImg: $('imageModalImg'),
-  closeImageModalBtn: $('closeImageModalBtn'),
+  collapseSpacesBtn: $('collapseSpacesBtn'),
+  collapseGroupsBtn: $('collapseGroupsBtn'),
+  themeColorInput: $('themeColorInput'),
+  resetThemeBtn: $('resetThemeBtn'),
+  mediaModal: $('mediaModal'),
+  mediaModalImg: $('mediaModalImg'),
+  mediaModalVideo: $('mediaModalVideo'),
+  closeMediaModalBtn: $('closeMediaModalBtn'),
+  saveModalMediaBtn: $('saveModalMediaBtn'),
 };
 
 function toast(message) {
   els.toast.textContent = message;
   els.toast.classList.add('show');
   clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => els.toast.classList.remove('show'), 1800);
+  toast._timer = setTimeout(() => els.toast.classList.remove('show'), 1900);
 }
 
 function uuid() {
@@ -103,6 +114,74 @@ async function clearStore(store) {
   await txDone(tx);
 }
 
+function sanitizeText(text) {
+  return String(text ?? '');
+}
+
+function escapeHtml(str) {
+  return sanitizeText(str).replace(/[&<>"']/g, ch => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
+  }[ch]));
+}
+
+function formatBytes(bytes = 0) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B','KB','MB','GB'];
+  let value = bytes;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i++;
+  }
+  return `${value >= 10 || i === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[i]}`;
+}
+
+function lightenHex(hex, amount = 28) {
+  const clean = /^#[0-9a-f]{6}$/i.test(hex) ? hex.slice(1) : DEFAULT_THEME.slice(1);
+  const num = parseInt(clean, 16);
+  const r = Math.min(255, (num >> 16) + amount);
+  const g = Math.min(255, ((num >> 8) & 255) + amount);
+  const b = Math.min(255, (num & 255) + amount);
+  return `#${[r,g,b].map(v => v.toString(16).padStart(2,'0')).join('')}`;
+}
+
+function applyTheme(color, persist = true) {
+  const safe = /^#[0-9a-f]{6}$/i.test(color) ? color : DEFAULT_THEME;
+  document.documentElement.style.setProperty('--accent', safe);
+  document.documentElement.style.setProperty('--accent-2', lightenHex(safe));
+  els.themeColorInput.value = safe;
+  if (persist) localStorage.setItem('torimemo-theme-color', safe);
+}
+
+function applyPanelPreferences() {
+  const spacesCollapsed = localStorage.getItem('torimemo-spaces-collapsed') === '1';
+  const groupsCollapsed = localStorage.getItem('torimemo-groups-collapsed') === '1';
+  els.app.classList.toggle('spaces-collapsed', spacesCollapsed);
+  els.app.classList.toggle('groups-collapsed', groupsCollapsed);
+}
+
+function isNarrow() {
+  return window.matchMedia('(max-width: 900px)').matches;
+}
+
+function setDesktopPanel(panel, collapsed) {
+  const className = panel === 'spaces' ? 'spaces-collapsed' : 'groups-collapsed';
+  els.app.classList.toggle(className, collapsed);
+  localStorage.setItem(`torimemo-${panel}-collapsed`, collapsed ? '1' : '0');
+}
+
+function togglePanel(panel) {
+  const pane = document.querySelector(panel === 'spaces' ? '.spaces-pane' : '.groups-pane');
+  const other = document.querySelector(panel === 'spaces' ? '.groups-pane' : '.spaces-pane');
+  if (isNarrow()) {
+    other?.classList.remove('open');
+    pane?.classList.toggle('open');
+    return;
+  }
+  const className = panel === 'spaces' ? 'spaces-collapsed' : 'groups-collapsed';
+  setDesktopPanel(panel, !els.app.classList.contains(className));
+}
+
 async function loadState() {
   [state.spaces, state.groups, state.notes, state.attachments] = await Promise.all([
     getAll('spaces'),
@@ -124,33 +203,39 @@ async function loadState() {
   render();
 }
 
-function sanitizeText(text) {
-  return String(text ?? '');
-}
-
 function render() {
   renderSpaces();
   renderGroups();
   renderNotes();
-  els.saveNoteBtn.disabled = !state.currentGroupId;
-  els.noteInput.disabled = !state.currentGroupId;
-  els.attachmentInput.disabled = !state.currentGroupId;
+
+  const hasSpace = !!state.currentSpaceId;
+  els.saveNoteBtn.disabled = !hasSpace;
+  els.noteInput.disabled = !hasSpace;
+  els.attachmentInput.disabled = !hasSpace;
+  els.noteInput.placeholder = hasSpace
+    ? (state.currentGroupId ? 'メモを書く…' : 'メモを書く…（保存するとグループを自動作成）')
+    : '先にスペースを作成してください';
 }
 
 function renderSpaces() {
   els.spacesList.innerHTML = '';
+
   for (const space of state.spaces) {
+    const icon = space.icon || '🗂️';
     const row = document.createElement('button');
     row.className = `list-item ${space.id === state.currentSpaceId ? 'active' : ''}`;
     row.innerHTML = `
-      <span class="item-main">▣ ${escapeHtml(space.name)}</span>
+      <span class="item-main">
+        <span class="space-icon" data-action="icon-space" data-id="${space.id}" title="アイコン変更">${escapeHtml(icon)}</span>
+        <span class="item-name">${escapeHtml(space.name)}</span>
+      </span>
       <span class="item-actions">
-        <span class="mini-btn" data-action="rename-space" data-id="${space.id}">✎</span>
-        <span class="mini-btn" data-action="delete-space" data-id="${space.id}">×</span>
+        <span class="mini-btn" data-action="rename-space" data-id="${space.id}" title="名前変更">✎</span>
+        <span class="mini-btn" data-action="delete-space" data-id="${space.id}" title="削除">×</span>
       </span>`;
+
     row.addEventListener('click', (e) => {
-      const action = e.target.dataset.action;
-      if (action) return;
+      if (e.target.dataset.action) return;
       state.currentSpaceId = space.id;
       state.currentGroupId = state.groups.find(g => g.spaceId === space.id)?.id || null;
       closeMobilePanels();
@@ -158,54 +243,100 @@ function renderSpaces() {
     });
     els.spacesList.append(row);
   }
+
   const current = state.spaces.find(s => s.id === state.currentSpaceId);
   els.currentSpaceName.textContent = current?.name || '未選択';
+  els.currentSpaceIcon.textContent = current?.icon || '🗂️';
 }
 
 function renderGroups() {
   els.groupsList.innerHTML = '';
   const groups = state.groups.filter(g => g.spaceId === state.currentSpaceId);
+
   for (const group of groups) {
     const row = document.createElement('button');
     row.className = `list-item ${group.id === state.currentGroupId ? 'active' : ''}`;
     row.innerHTML = `
-      <span class="item-main"># ${escapeHtml(group.name)}</span>
+      <span class="item-main"><span>#</span><span class="item-name">${escapeHtml(group.name)}</span></span>
       <span class="item-actions">
-        <span class="mini-btn" data-action="rename-group" data-id="${group.id}">✎</span>
-        <span class="mini-btn" data-action="delete-group" data-id="${group.id}">×</span>
+        <span class="mini-btn" data-action="rename-group" data-id="${group.id}" title="名前変更">✎</span>
+        <span class="mini-btn" data-action="delete-group" data-id="${group.id}" title="削除">×</span>
       </span>`;
+
     row.addEventListener('click', (e) => {
-      const action = e.target.dataset.action;
-      if (action) return;
+      if (e.target.dataset.action) return;
       state.currentGroupId = group.id;
       document.querySelector('.groups-pane')?.classList.remove('open');
       render();
     });
     els.groupsList.append(row);
   }
+
   const current = state.groups.find(g => g.id === state.currentGroupId);
-  els.currentGroupName.textContent = current?.name || 'グループを選択';
+  els.currentGroupName.textContent = current?.name || (state.currentSpaceId ? '新しいメモ' : 'グループを選択');
+}
+
+function clearRenderedObjectUrls() {
+  for (const url of state.activeObjectUrls) URL.revokeObjectURL(url);
+  state.activeObjectUrls.clear();
+}
+
+function makeObjectUrl(blob) {
+  const url = URL.createObjectURL(blob);
+  state.activeObjectUrls.add(url);
+  return url;
+}
+
+function bindVideoDoubleTap(video, attachment, url) {
+  video.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    openMediaModal(attachment, url, 'video');
+  });
+
+  let lastTap = 0;
+  video.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    if (now - lastTap < 360) {
+      e.preventDefault();
+      openMediaModal(attachment, url, 'video');
+      lastTap = 0;
+    } else {
+      lastTap = now;
+    }
+  }, { passive: false });
 }
 
 async function renderNotes() {
+  clearRenderedObjectUrls();
+
   const q = els.searchInput.value.trim().toLowerCase();
   let notes = state.notes.filter(n => n.groupId === state.currentGroupId);
-  if (q) notes = notes.filter(n => n.text.toLowerCase().includes(q));
+  if (q) notes = notes.filter(n => (n.text || '').toLowerCase().includes(q));
 
   els.notesList.innerHTML = '';
-  els.emptyState.classList.toggle('hidden', !!state.currentGroupId && notes.length > 0);
+
+  if (!state.currentSpaceId) {
+    els.emptyState.classList.remove('hidden');
+    els.emptyState.querySelector('h2').textContent = 'スペースを作成してください';
+    els.emptyState.querySelector('p').textContent = '左側の「＋」から最初のスペースを作成してください。';
+    return;
+  }
 
   if (!state.currentGroupId) {
-    els.emptyState.querySelector('h2').textContent = 'スペースとグループを作成してください';
-    els.emptyState.querySelector('p').textContent = '左側の「＋」から、まずスペースを作成してください。';
+    els.emptyState.classList.remove('hidden');
+    els.emptyState.querySelector('h2').textContent = 'メモグループがありません';
+    els.emptyState.querySelector('p').textContent = 'そのまま下にメモを書くと、最初の文章を名前にしたメモグループを自動で作成します。';
     return;
   }
 
   if (!notes.length) {
+    els.emptyState.classList.remove('hidden');
     els.emptyState.querySelector('h2').textContent = q ? '一致するメモがありません' : 'まだメモがありません';
     els.emptyState.querySelector('p').textContent = q ? '別の言葉で検索してみてください。' : '下の入力欄から最初のメモを書いてみましょう。';
     return;
   }
+
+  els.emptyState.classList.add('hidden');
 
   for (const note of notes) {
     const card = document.createElement('article');
@@ -219,42 +350,86 @@ async function renderNotes() {
           <button data-action="delete-note" data-id="${note.id}">削除</button>
         </span>
       </div>
-      <div class="note-text">${escapeHtml(note.text).replaceAll('\n','<br>')}</div>
+      <div class="note-text">${escapeHtml(note.text || '').replaceAll('\n','<br>')}</div>
       <div class="attachments" data-attachments-for="${note.id}"></div>
     `;
     els.notesList.append(card);
 
     const box = card.querySelector(`[data-attachments-for="${note.id}"]`);
     const atts = state.attachments.filter(a => a.noteId === note.id);
+
     for (const att of atts) {
-      const url = URL.createObjectURL(att.blob);
-      const node = document.createElement(att.type.startsWith('video/') ? 'video' : 'img');
-      node.src = url;
-      node.alt = att.name || '添付ファイル';
-      if (node.tagName === 'VIDEO') {
-        node.controls = true;
-      } else {
-        node.dataset.fullImage = url;
-        node.title = 'タップで拡大';
+      const type = att.type || att.blob?.type || 'application/octet-stream';
+      const name = att.name || '添付ファイル';
+      const url = makeObjectUrl(att.blob);
+
+      if (type.startsWith('image/')) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'attachment-card';
+        wrapper.innerHTML = `
+          <img alt="${escapeHtml(name)}" title="タップで拡大" />
+          <div class="attachment-footer">
+            <span class="attachment-name">${escapeHtml(name)}</span>
+            <button class="attachment-save" type="button">保存</button>
+          </div>`;
+        const img = wrapper.querySelector('img');
+        img.src = url;
+        img.addEventListener('click', () => openMediaModal(att, url, 'image'));
+        wrapper.querySelector('.attachment-save').addEventListener('click', () => saveAttachment(att));
+        box.append(wrapper);
+        continue;
       }
-      node.onload = node.onloadeddata = () => {
-        if (node.tagName === 'VIDEO') setTimeout(() => URL.revokeObjectURL(url), 1000);
-      };
-      box.append(node);
+
+      if (type.startsWith('video/')) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'attachment-card';
+        wrapper.innerHTML = `
+          <video controls playsinline></video>
+          <span class="video-hint">ダブルタップで拡大</span>
+          <div class="attachment-footer">
+            <span class="attachment-name">${escapeHtml(name)}</span>
+            <button class="attachment-save" type="button">保存</button>
+          </div>`;
+        const video = wrapper.querySelector('video');
+        video.src = url;
+        bindVideoDoubleTap(video, att, url);
+        wrapper.querySelector('.attachment-save').addEventListener('click', () => saveAttachment(att));
+        box.append(wrapper);
+        continue;
+      }
+
+      const fileCard = document.createElement('div');
+      fileCard.className = 'attachment-card file-attachment';
+      fileCard.innerHTML = `
+        <div class="file-icon">📄</div>
+        <div class="file-info">
+          <div class="file-title">${escapeHtml(name)}</div>
+          <div class="file-meta">${escapeHtml(type)} · ${formatBytes(att.blob?.size || 0)}</div>
+        </div>
+        <button class="attachment-save" type="button">保存</button>`;
+      fileCard.querySelector('.attachment-save').addEventListener('click', () => saveAttachment(att));
+      box.append(fileCard);
     }
   }
 }
 
-function escapeHtml(str) {
-  return sanitizeText(str).replace(/[&<>"']/g, ch => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
-  }[ch]));
+function deriveAutoGroupName(text, files = []) {
+  const firstLine = (text || '').split(/\r?\n/).map(s => s.trim()).find(Boolean);
+  let base = firstLine || files[0]?.name?.replace(/\.[^.]+$/, '') || '新しいメモ';
+  base = base.replace(/\s+/g, ' ').trim();
+  return base.length > 28 ? `${base.slice(0, 28)}…` : base;
 }
 
 els.addSpaceBtn.addEventListener('click', async () => {
   const name = prompt('スペース名を入力してください');
   if (!name?.trim()) return;
-  const space = { id: uuid(), name: name.trim(), createdAt: Date.now() };
+  const iconInput = prompt('スペースのアイコンを絵文字で入力してください（空欄なら 🗂️）', '🗂️');
+  const space = {
+    id: uuid(),
+    name: name.trim(),
+    icon: iconInput?.trim() || '🗂️',
+    createdAt: Date.now()
+  };
   await put('spaces', space);
   state.currentSpaceId = space.id;
   state.currentGroupId = null;
@@ -275,19 +450,32 @@ els.addGroupBtn.addEventListener('click', async () => {
 
 els.attachmentInput.addEventListener('change', () => {
   state.pendingFiles = [...els.attachmentInput.files];
-  const totalMb = state.pendingFiles.reduce((s,f) => s + f.size, 0) / 1024 / 1024;
+  const totalMb = state.pendingFiles.reduce((sum, file) => sum + file.size, 0) / 1024 / 1024;
   els.attachmentStatus.textContent = state.pendingFiles.length
     ? `${state.pendingFiles.length}件 / 約${totalMb.toFixed(1)}MB`
     : '';
 });
 
 els.saveNoteBtn.addEventListener('click', async () => {
-  if (!state.currentGroupId) return;
+  if (!state.currentSpaceId) return toast('先にスペースを作成してください');
+
   const text = els.noteInput.value.trim();
-  if (!text && state.pendingFiles.length === 0) return toast('文章か画像・動画を追加してください');
+  if (!text && state.pendingFiles.length === 0) return toast('文章かファイルを追加してください');
 
   els.saveNoteBtn.disabled = true;
+
   try {
+    if (!state.currentGroupId) {
+      const group = {
+        id: uuid(),
+        spaceId: state.currentSpaceId,
+        name: deriveAutoGroupName(text, state.pendingFiles),
+        createdAt: Date.now()
+      };
+      await put('groups', group);
+      state.currentGroupId = group.id;
+    }
+
     const note = {
       id: uuid(),
       groupId: state.currentGroupId,
@@ -316,9 +504,9 @@ els.saveNoteBtn.addEventListener('click', async () => {
     toast('メモを保存しました');
   } catch (err) {
     console.error(err);
-    alert('保存に失敗しました。動画などのファイルが大きすぎる場合、端末の空き容量やブラウザの保存容量を確認してください。');
+    alert('保存に失敗しました。大きなファイルの場合は、端末やブラウザの空き容量を確認してください。');
   } finally {
-    els.saveNoteBtn.disabled = !state.currentGroupId;
+    els.saveNoteBtn.disabled = !state.currentSpaceId;
   }
 });
 
@@ -329,6 +517,17 @@ document.addEventListener('click', async (e) => {
   const id = e.target.dataset?.id;
   if (!action || !id) return;
 
+  if (action === 'icon-space') {
+    e.stopPropagation();
+    const item = state.spaces.find(s => s.id === id);
+    if (!item) return;
+    const icon = prompt('スペースのアイコンを絵文字で入力してください', item.icon || '🗂️');
+    if (icon === null) return;
+    await put('spaces', { ...item, icon: icon.trim() || '🗂️' });
+    await loadState();
+    return;
+  }
+
   if (action === 'rename-space') {
     e.stopPropagation();
     const item = state.spaces.find(s => s.id === id);
@@ -336,6 +535,7 @@ document.addEventListener('click', async (e) => {
     if (!name?.trim()) return;
     await put('spaces', { ...item, name: name.trim() });
     await loadState();
+    return;
   }
 
   if (action === 'delete-space') {
@@ -348,8 +548,12 @@ document.addEventListener('click', async (e) => {
     for (const noteId of noteIds) await remove('notes', noteId);
     for (const groupId of groupIds) await remove('groups', groupId);
     await remove('spaces', id);
-    if (state.currentSpaceId === id) { state.currentSpaceId = null; state.currentGroupId = null; }
+    if (state.currentSpaceId === id) {
+      state.currentSpaceId = null;
+      state.currentGroupId = null;
+    }
     await loadState();
+    return;
   }
 
   if (action === 'rename-group') {
@@ -359,6 +563,7 @@ document.addEventListener('click', async (e) => {
     if (!name?.trim()) return;
     await put('groups', { ...item, name: name.trim() });
     await loadState();
+    return;
   }
 
   if (action === 'delete-group') {
@@ -371,6 +576,7 @@ document.addEventListener('click', async (e) => {
     await remove('groups', id);
     if (state.currentGroupId === id) state.currentGroupId = null;
     await loadState();
+    return;
   }
 
   if (action === 'edit-note') {
@@ -380,6 +586,7 @@ document.addEventListener('click', async (e) => {
     await put('notes', { ...note, text, updatedAt: Date.now() });
     await loadState();
     toast('メモを更新しました');
+    return;
   }
 
   if (action === 'delete-note') {
@@ -390,6 +597,94 @@ document.addEventListener('click', async (e) => {
     toast('メモを削除しました');
   }
 });
+
+function openMediaModal(attachment, url, kind) {
+  state.modalAttachmentId = attachment.id;
+  els.mediaModal.classList.remove('hidden');
+  els.mediaModal.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+
+  if (kind === 'image') {
+    els.mediaModalVideo.pause();
+    els.mediaModalVideo.removeAttribute('src');
+    els.mediaModalVideo.classList.add('hidden');
+    els.mediaModalImg.src = url;
+    els.mediaModalImg.alt = attachment.name || '拡大画像';
+    els.mediaModalImg.classList.remove('hidden');
+  } else {
+    els.mediaModalImg.removeAttribute('src');
+    els.mediaModalImg.classList.add('hidden');
+    els.mediaModalVideo.src = url;
+    els.mediaModalVideo.classList.remove('hidden');
+    els.mediaModalVideo.play().catch(() => {});
+  }
+}
+
+function closeMediaModal() {
+  els.mediaModalVideo.pause();
+  els.mediaModalVideo.removeAttribute('src');
+  els.mediaModalImg.removeAttribute('src');
+  els.mediaModalImg.classList.add('hidden');
+  els.mediaModalVideo.classList.add('hidden');
+  els.mediaModal.classList.add('hidden');
+  els.mediaModal.setAttribute('aria-hidden', 'true');
+  state.modalAttachmentId = null;
+  document.body.style.overflow = '';
+}
+
+els.closeMediaModalBtn.addEventListener('click', closeMediaModal);
+els.mediaModal.addEventListener('click', (e) => {
+  if (e.target === els.mediaModal || e.target.classList.contains('media-modal-backdrop')) closeMediaModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !els.mediaModal.classList.contains('hidden')) closeMediaModal();
+});
+els.saveModalMediaBtn.addEventListener('click', () => {
+  const att = state.attachments.find(a => a.id === state.modalAttachmentId);
+  if (att) saveAttachment(att);
+});
+
+async function saveAttachment(att) {
+  try {
+    const file = new File([att.blob], att.name || 'torimemo-file', {
+      type: att.type || att.blob?.type || 'application/octet-stream'
+    });
+
+    if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+      await navigator.share({ files: [file], title: att.name || 'トリメモ' });
+      return;
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return;
+    console.warn('Share fallback:', err);
+  }
+
+  const url = URL.createObjectURL(att.blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = att.name || 'torimemo-file';
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  toast('ファイルを保存しました');
+}
+
+els.themeColorInput.addEventListener('input', (e) => applyTheme(e.target.value));
+els.resetThemeBtn.addEventListener('click', () => {
+  applyTheme(DEFAULT_THEME);
+  toast('テーマカラーを初期色に戻しました');
+});
+
+els.toggleSpacesBtn.addEventListener('click', () => togglePanel('spaces'));
+els.toggleGroupsBtn.addEventListener('click', () => togglePanel('groups'));
+els.collapseSpacesBtn.addEventListener('click', () => setDesktopPanel('spaces', true));
+els.collapseGroupsBtn.addEventListener('click', () => setDesktopPanel('groups', true));
+
+function closeMobilePanels() {
+  document.querySelector('.spaces-pane')?.classList.remove('open');
+  document.querySelector('.groups-pane')?.classList.remove('open');
+}
 
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
@@ -421,15 +716,22 @@ els.exportBtn.addEventListener('click', async () => {
       data: await blobToBase64(a.blob),
     });
   }
+
   const backup = {
     app: 'torimemo',
-    version: 1,
+    version: 1.2,
     exportedAt: new Date().toISOString(),
     spaces: state.spaces,
     groups: state.groups,
     notes: state.notes,
     attachments,
+    settings: {
+      themeColor: localStorage.getItem('torimemo-theme-color') || DEFAULT_THEME,
+      spacesCollapsed: localStorage.getItem('torimemo-spaces-collapsed') === '1',
+      groupsCollapsed: localStorage.getItem('torimemo-groups-collapsed') === '1',
+    }
   };
+
   const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -443,24 +745,41 @@ els.exportBtn.addEventListener('click', async () => {
 els.importInput.addEventListener('change', async () => {
   const file = els.importInput.files?.[0];
   if (!file) return;
+
   try {
     const backup = JSON.parse(await file.text());
     if (backup.app !== 'torimemo') throw new Error('invalid backup');
     if (!confirm('現在のデータを消して、このバックアップに置き換えますか？')) return;
 
     for (const store of ['attachments','notes','groups','spaces']) await clearStore(store);
-
     for (const item of backup.spaces || []) await put('spaces', item);
     for (const item of backup.groups || []) await put('groups', item);
     for (const item of backup.notes || []) await put('notes', item);
     for (const item of backup.attachments || []) {
       await put('attachments', {
-        id: item.id, noteId: item.noteId, name: item.name, type: item.type,
-        createdAt: item.createdAt, blob: base64ToBlob(item.data),
+        id: item.id,
+        noteId: item.noteId,
+        name: item.name,
+        type: item.type,
+        createdAt: item.createdAt,
+        blob: base64ToBlob(item.data),
       });
     }
+
+    if (backup.settings?.themeColor) {
+      localStorage.setItem('torimemo-theme-color', backup.settings.themeColor);
+    }
+    if (typeof backup.settings?.spacesCollapsed === 'boolean') {
+      localStorage.setItem('torimemo-spaces-collapsed', backup.settings.spacesCollapsed ? '1' : '0');
+    }
+    if (typeof backup.settings?.groupsCollapsed === 'boolean') {
+      localStorage.setItem('torimemo-groups-collapsed', backup.settings.groupsCollapsed ? '1' : '0');
+    }
+
     state.currentSpaceId = null;
     state.currentGroupId = null;
+    applyTheme(localStorage.getItem('torimemo-theme-color') || DEFAULT_THEME, false);
+    applyPanelPreferences();
     await loadState();
     toast('バックアップを読み込みました');
   } catch (err) {
@@ -471,68 +790,28 @@ els.importInput.addEventListener('change', async () => {
   }
 });
 
-els.toggleSpacesBtn.addEventListener('click', () => {
-  document.querySelector('.spaces-pane')?.classList.toggle('open');
-  document.querySelector('.groups-pane')?.classList.remove('open');
-});
-els.toggleGroupsBtn.addEventListener('click', () => {
-  document.querySelector('.groups-pane')?.classList.toggle('open');
-  document.querySelector('.spaces-pane')?.classList.remove('open');
-});
-function closeMobilePanels() {
-  document.querySelector('.spaces-pane')?.classList.remove('open');
-  document.querySelector('.groups-pane')?.classList.remove('open');
-}
-
-function openImageModal(src, alt = '拡大画像') {
-  els.imageModalImg.src = src;
-  els.imageModalImg.alt = alt;
-  els.imageModal.classList.remove('hidden');
-  els.imageModal.setAttribute('aria-hidden', 'false');
-  document.body.style.overflow = 'hidden';
-}
-
-function closeImageModal() {
-  els.imageModal.classList.add('hidden');
-  els.imageModal.setAttribute('aria-hidden', 'true');
-  els.imageModalImg.removeAttribute('src');
-  document.body.style.overflow = '';
-}
-
-els.notesList.addEventListener('click', (e) => {
-  const img = e.target.closest('img[data-full-image]');
-  if (!img) return;
-  openImageModal(img.dataset.fullImage || img.src, img.alt || '拡大画像');
-});
-
-els.closeImageModalBtn.addEventListener('click', closeImageModal);
-els.imageModal.addEventListener('click', (e) => {
-  if (e.target === els.imageModal || e.target.classList.contains('image-modal-backdrop')) {
-    closeImageModal();
-  }
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !els.imageModal.classList.contains('hidden')) closeImageModal();
-});
-
 async function ensureDemoData() {
   const spaces = await getAll('spaces');
   if (spaces.length) return;
-  const space = { id: uuid(), name: 'はじめてのスペース', createdAt: Date.now() };
+  const space = { id: uuid(), name: 'はじめてのスペース', icon: '🗂️', createdAt: Date.now() };
   const group = { id: uuid(), spaceId: space.id, name: 'メモ', createdAt: Date.now() };
   await put('spaces', space);
   await put('groups', group);
 }
 
 async function main() {
+  applyTheme(localStorage.getItem('torimemo-theme-color') || DEFAULT_THEME, false);
+  applyPanelPreferences();
+
   state.db = await openDb();
   await ensureDemoData();
   await loadState();
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./service-worker.js').catch(console.warn);
+    navigator.serviceWorker.register('./service-worker.js?v=1.2').catch(console.warn);
   }
 }
+
 main().catch(err => {
   console.error(err);
   alert('トリメモの起動に失敗しました。ページを再読み込みしてください。');
