@@ -13,6 +13,7 @@ const state = {
   pendingFiles: [],
   activeObjectUrls: new Set(),
   modalAttachmentId: null,
+  pendingSpaceIconId: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -47,6 +48,14 @@ const els = {
   mediaModalVideo: $('mediaModalVideo'),
   closeMediaModalBtn: $('closeMediaModalBtn'),
   saveModalMediaBtn: $('saveModalMediaBtn'),
+  appearanceMode: $('appearanceMode'),
+  setPasswordBtn: $('setPasswordBtn'),
+  lockNowBtn: $('lockNowBtn'),
+  spaceIconImageInput: $('spaceIconImageInput'),
+  lockScreen: $('lockScreen'),
+  unlockForm: $('unlockForm'),
+  unlockPasswordInput: $('unlockPasswordInput'),
+  lockError: $('lockError'),
 };
 
 function toast(message) {
@@ -122,6 +131,113 @@ function escapeHtml(str) {
   return sanitizeText(str).replace(/[&<>"']/g, ch => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
   }[ch]));
+}
+
+function escapeAttr(str) {
+  return escapeHtml(str);
+}
+
+function linkifyText(text) {
+  const raw = sanitizeText(text);
+  const regex = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
+  let html = '';
+  let last = 0;
+
+  for (const match of raw.matchAll(regex)) {
+    const index = match.index ?? 0;
+    html += escapeHtml(raw.slice(last, index)).replaceAll('\n', '<br>');
+
+    let visible = match[0];
+    let trailing = '';
+    while (/[.,!?;:)\]}、。！？）］】]$/.test(visible)) {
+      trailing = visible.slice(-1) + trailing;
+      visible = visible.slice(0, -1);
+    }
+
+    const href = visible.toLowerCase().startsWith('www.') ? `https://${visible}` : visible;
+    html += `<a class="note-link" href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(visible)}</a>`;
+    html += escapeHtml(trailing);
+    last = index + match[0].length;
+  }
+
+  html += escapeHtml(raw.slice(last)).replaceAll('\n', '<br>');
+  return html;
+}
+
+function applyAppearance(mode, persist = true) {
+  const safe = mode === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.mode = safe;
+  els.appearanceMode.value = safe;
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) metaTheme.setAttribute('content', safe === 'light' ? '#ffffff' : '#1f232b');
+  if (persist) localStorage.setItem('torimemo-appearance-mode', safe);
+}
+
+function spaceIconHtml(space, className = 'space-icon-img') {
+  if (space?.iconImage && /^data:image\//.test(space.iconImage)) {
+    return `<img class="${className}" src="${escapeAttr(space.iconImage)}" alt="" />`;
+  }
+  return escapeHtml(space?.icon || '🗂️');
+}
+
+function fileToSquareIcon(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('画像を読み込めませんでした'));
+      img.onload = () => {
+        const size = 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+
+        const side = Math.min(img.naturalWidth, img.naturalHeight);
+        const sx = (img.naturalWidth - side) / 2;
+        const sy = (img.naturalHeight - side) / 2;
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+        resolve(canvas.toDataURL('image/jpeg', 0.86));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function hashPassword(password) {
+  const bytes = new TextEncoder().encode(password);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hasPasswordLock() {
+  return !!localStorage.getItem('torimemo-lock-hash');
+}
+
+function updateLockControls() {
+  const enabled = hasPasswordLock();
+  els.setPasswordBtn.textContent = enabled ? '変更' : '設定';
+  els.lockNowBtn.classList.toggle('hidden', !enabled);
+}
+
+function showLockScreen() {
+  if (!hasPasswordLock()) return;
+  document.body.classList.add('is-locked');
+  els.lockScreen.classList.remove('hidden');
+  els.lockScreen.setAttribute('aria-hidden', 'false');
+  els.lockError.textContent = '';
+  els.unlockPasswordInput.value = '';
+  setTimeout(() => els.unlockPasswordInput.focus(), 50);
+}
+
+function hideLockScreen() {
+  document.body.classList.remove('is-locked');
+  els.lockScreen.classList.add('hidden');
+  els.lockScreen.setAttribute('aria-hidden', 'true');
+  els.lockError.textContent = '';
+  els.unlockPasswordInput.value = '';
 }
 
 function formatBytes(bytes = 0) {
@@ -221,21 +337,21 @@ function renderSpaces() {
   els.spacesList.innerHTML = '';
 
   for (const space of state.spaces) {
-    const icon = space.icon || '🗂️';
     const row = document.createElement('button');
     row.className = `list-item ${space.id === state.currentSpaceId ? 'active' : ''}`;
     row.innerHTML = `
       <span class="item-main">
-        <span class="space-icon" data-action="icon-space" data-id="${space.id}" title="アイコン変更">${escapeHtml(icon)}</span>
+        <span class="space-icon" data-action="icon-space" data-id="${space.id}" title="絵文字アイコン変更">${spaceIconHtml(space)}</span>
         <span class="item-name">${escapeHtml(space.name)}</span>
       </span>
       <span class="item-actions">
+        <span class="mini-btn" data-action="image-space" data-id="${space.id}" title="画像アイコン">🖼</span>
         <span class="mini-btn" data-action="rename-space" data-id="${space.id}" title="名前変更">✎</span>
         <span class="mini-btn" data-action="delete-space" data-id="${space.id}" title="削除">×</span>
       </span>`;
 
     row.addEventListener('click', (e) => {
-      if (e.target.dataset.action) return;
+      if (e.target.closest('[data-action]')) return;
       state.currentSpaceId = space.id;
       state.currentGroupId = state.groups.find(g => g.spaceId === space.id)?.id || null;
       closeMobilePanels();
@@ -246,7 +362,7 @@ function renderSpaces() {
 
   const current = state.spaces.find(s => s.id === state.currentSpaceId);
   els.currentSpaceName.textContent = current?.name || '未選択';
-  els.currentSpaceIcon.textContent = current?.icon || '🗂️';
+  els.currentSpaceIcon.innerHTML = current ? spaceIconHtml(current, 'space-icon-img') : '🗂️';
 }
 
 function renderGroups() {
@@ -350,7 +466,7 @@ async function renderNotes() {
           <button data-action="delete-note" data-id="${note.id}">削除</button>
         </span>
       </div>
-      <div class="note-text">${escapeHtml(note.text || '').replaceAll('\n','<br>')}</div>
+      <div class="note-text">${linkifyText(note.text || '')}</div>
       <div class="attachments" data-attachments-for="${note.id}"></div>
     `;
     els.notesList.append(card);
@@ -448,6 +564,28 @@ els.addGroupBtn.addEventListener('click', async () => {
   toast('グループを作成しました');
 });
 
+
+els.spaceIconImageInput.addEventListener('change', async () => {
+  const file = els.spaceIconImageInput.files?.[0];
+  const id = state.pendingSpaceIconId;
+  state.pendingSpaceIconId = null;
+  if (!file || !id) return;
+
+  try {
+    const item = state.spaces.find(s => s.id === id);
+    if (!item) return;
+    const iconImage = await fileToSquareIcon(file);
+    await put('spaces', { ...item, iconImage });
+    await loadState();
+    toast('スペースの画像アイコンを変更しました');
+  } catch (err) {
+    console.error(err);
+    alert('画像アイコンの設定に失敗しました。');
+  } finally {
+    els.spaceIconImageInput.value = '';
+  }
+});
+
 els.attachmentInput.addEventListener('change', () => {
   state.pendingFiles = [...els.attachmentInput.files];
   const totalMb = state.pendingFiles.reduce((sum, file) => sum + file.size, 0) / 1024 / 1024;
@@ -523,8 +661,16 @@ document.addEventListener('click', async (e) => {
     if (!item) return;
     const icon = prompt('スペースのアイコンを絵文字で入力してください', item.icon || '🗂️');
     if (icon === null) return;
-    await put('spaces', { ...item, icon: icon.trim() || '🗂️' });
+    await put('spaces', { ...item, icon: icon.trim() || '🗂️', iconImage: null });
     await loadState();
+    return;
+  }
+
+  if (action === 'image-space') {
+    e.stopPropagation();
+    state.pendingSpaceIconId = id;
+    els.spaceIconImageInput.value = '';
+    els.spaceIconImageInput.click();
     return;
   }
 
@@ -670,6 +816,88 @@ async function saveAttachment(att) {
   toast('ファイルを保存しました');
 }
 
+els.appearanceMode.addEventListener('change', (e) => {
+  applyAppearance(e.target.value);
+});
+
+els.setPasswordBtn.addEventListener('click', async () => {
+  const currentHash = localStorage.getItem('torimemo-lock-hash');
+
+  if (currentHash) {
+    const current = prompt('現在のパスワードを入力してください');
+    if (current === null) return;
+    if (await hashPassword(current) !== currentHash) {
+      alert('現在のパスワードが違います。');
+      return;
+    }
+
+    const next = prompt('新しいパスワードを入力してください。\nロックを解除する場合は空欄のままOKを押してください。');
+    if (next === null) return;
+
+    if (!next) {
+      if (confirm('パスワードロックを解除しますか？')) {
+        localStorage.removeItem('torimemo-lock-hash');
+        updateLockControls();
+        toast('パスワードロックを解除しました');
+      }
+      return;
+    }
+
+    if (next.length < 4) {
+      alert('パスワードは4文字以上にしてください。');
+      return;
+    }
+
+    const confirmNext = prompt('確認のため、もう一度新しいパスワードを入力してください');
+    if (confirmNext !== next) {
+      alert('パスワードが一致しません。');
+      return;
+    }
+
+    localStorage.setItem('torimemo-lock-hash', await hashPassword(next));
+    updateLockControls();
+    toast('パスワードを変更しました');
+    return;
+  }
+
+  const password = prompt('トリメモを開くためのパスワードを設定してください（4文字以上）');
+  if (password === null) return;
+  if (password.length < 4) {
+    alert('パスワードは4文字以上にしてください。');
+    return;
+  }
+
+  const confirmPassword = prompt('確認のため、もう一度パスワードを入力してください');
+  if (confirmPassword !== password) {
+    alert('パスワードが一致しません。');
+    return;
+  }
+
+  localStorage.setItem('torimemo-lock-hash', await hashPassword(password));
+  updateLockControls();
+  toast('パスワードロックを設定しました');
+});
+
+els.lockNowBtn.addEventListener('click', showLockScreen);
+
+els.unlockForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = els.unlockPasswordInput.value;
+  const saved = localStorage.getItem('torimemo-lock-hash');
+  if (!saved) {
+    hideLockScreen();
+    return;
+  }
+
+  const inputHash = await hashPassword(input);
+  if (inputHash === saved) {
+    hideLockScreen();
+  } else {
+    els.lockError.textContent = 'パスワードが違います。';
+    els.unlockPasswordInput.select();
+  }
+});
+
 els.themeColorInput.addEventListener('input', (e) => applyTheme(e.target.value));
 els.resetThemeBtn.addEventListener('click', () => {
   applyTheme(DEFAULT_THEME);
@@ -719,7 +947,7 @@ els.exportBtn.addEventListener('click', async () => {
 
   const backup = {
     app: 'torimemo',
-    version: 1.2,
+    version: 1.3,
     exportedAt: new Date().toISOString(),
     spaces: state.spaces,
     groups: state.groups,
@@ -727,6 +955,7 @@ els.exportBtn.addEventListener('click', async () => {
     attachments,
     settings: {
       themeColor: localStorage.getItem('torimemo-theme-color') || DEFAULT_THEME,
+      appearanceMode: localStorage.getItem('torimemo-appearance-mode') || 'dark',
       spacesCollapsed: localStorage.getItem('torimemo-spaces-collapsed') === '1',
       groupsCollapsed: localStorage.getItem('torimemo-groups-collapsed') === '1',
     }
@@ -769,6 +998,9 @@ els.importInput.addEventListener('change', async () => {
     if (backup.settings?.themeColor) {
       localStorage.setItem('torimemo-theme-color', backup.settings.themeColor);
     }
+    if (backup.settings?.appearanceMode) {
+      localStorage.setItem('torimemo-appearance-mode', backup.settings.appearanceMode === 'light' ? 'light' : 'dark');
+    }
     if (typeof backup.settings?.spacesCollapsed === 'boolean') {
       localStorage.setItem('torimemo-spaces-collapsed', backup.settings.spacesCollapsed ? '1' : '0');
     }
@@ -779,6 +1011,7 @@ els.importInput.addEventListener('change', async () => {
     state.currentSpaceId = null;
     state.currentGroupId = null;
     applyTheme(localStorage.getItem('torimemo-theme-color') || DEFAULT_THEME, false);
+    applyAppearance(localStorage.getItem('torimemo-appearance-mode') || 'dark', false);
     applyPanelPreferences();
     await loadState();
     toast('バックアップを読み込みました');
@@ -801,14 +1034,17 @@ async function ensureDemoData() {
 
 async function main() {
   applyTheme(localStorage.getItem('torimemo-theme-color') || DEFAULT_THEME, false);
+  applyAppearance(localStorage.getItem('torimemo-appearance-mode') || 'dark', false);
   applyPanelPreferences();
+  updateLockControls();
+  if (hasPasswordLock()) showLockScreen();
 
   state.db = await openDb();
   await ensureDemoData();
   await loadState();
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./service-worker.js?v=1.2').catch(console.warn);
+    navigator.serviceWorker.register('./service-worker.js?v=1.3').catch(console.warn);
   }
 }
 

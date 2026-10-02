@@ -7,7 +7,7 @@
   <title>トリメモ</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="./style.css?v=1.2" />
+  <link rel="stylesheet" href="./style.css?v=1.3" />
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -16,7 +16,7 @@
         <div class="brand-mark">T</div>
         <div class="brand-copy">
           <strong>トリメモ</strong>
-          <small>offline memo · v1.2</small>
+          <small>offline memo · v1.3</small>
         </div>
         <button id="collapseSpacesBtn" class="pane-collapse-btn" title="スペースを隠す">‹</button>
       </div>
@@ -40,6 +40,29 @@
           </div>
         </div>
 
+
+        <div class="theme-box">
+          <div>
+            <strong>表示モード</strong>
+            <small>背景をライト / ナイト切替</small>
+          </div>
+          <select id="appearanceMode" class="settings-select" aria-label="表示モード">
+            <option value="dark">ナイト</option>
+            <option value="light">ライト</option>
+          </select>
+        </div>
+
+        <div class="theme-box">
+          <div>
+            <strong>パスワードロック</strong>
+            <small>この端末でアプリをロック</small>
+          </div>
+          <div class="lock-actions">
+            <button id="setPasswordBtn" class="small-settings-btn">設定</button>
+            <button id="lockNowBtn" class="small-settings-btn hidden">ロック</button>
+          </div>
+        </div>
+
         <button id="exportBtn" class="secondary-btn">バックアップを書き出す</button>
         <label class="secondary-btn file-label">
           バックアップを読み込む
@@ -52,7 +75,7 @@
       <div class="pane-title-row group-title-row">
         <div class="current-space-label">
           <small>現在のスペース</small>
-          <strong><span id="currentSpaceIcon">🗂️</span> <span id="currentSpaceName">未選択</span></strong>
+          <strong><span id="currentSpaceIcon" class="current-space-icon">🗂️</span> <span id="currentSpaceName">未選択</span></strong>
         </div>
         <div class="pane-title-actions">
           <button id="addGroupBtn" class="icon-btn" title="グループ追加">＋</button>
@@ -101,6 +124,20 @@
     </main>
   </div>
 
+
+  <input id="spaceIconImageInput" type="file" accept="image/*" hidden />
+
+  <div id="lockScreen" class="lock-screen hidden" aria-hidden="true">
+    <form id="unlockForm" class="lock-card">
+      <div class="lock-logo">T</div>
+      <h2>トリメモはロックされています</h2>
+      <p>パスワードを入力してください。</p>
+      <input id="unlockPasswordInput" class="lock-input" type="password" autocomplete="current-password" placeholder="パスワード" />
+      <button class="primary-btn lock-submit" type="submit">ロック解除</button>
+      <div id="lockError" class="lock-error"></div>
+    </form>
+  </div>
+
   <div id="mediaModal" class="media-modal hidden" aria-hidden="true">
     <div class="media-modal-backdrop"></div>
     <div class="media-modal-toolbar">
@@ -114,6 +151,6 @@
   </div>
 
   <div id="toast" class="toast" aria-live="polite"></div>
-  <script type="module" src="./app.js?v=1.2"></script>
+  <script type="module" src="./app.js?v=1.3"></script>
 </body>
 </html>

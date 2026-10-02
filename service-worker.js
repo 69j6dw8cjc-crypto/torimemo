@@ -1,9 +1,9 @@
-const CACHE_NAME = 'torimemo-v1.2';
+const CACHE_NAME = 'torimemo-v1.3';
 const ASSETS = [
   './',
   './index.html',
-  './style.css?v=1.2',
-  './app.js?v=1.2',
+  './style.css?v=1.3',
+  './app.js?v=1.3',
   './manifest.webmanifest',
   './icon.svg'
 ];
